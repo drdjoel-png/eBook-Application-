@@ -1,0 +1,6 @@
+{
+  "name": "Panduan Interaktif Demam Anak",
+  "description": "Alat bantu edukasi interaktif untuk membantu Bunda menilai demam ananda: kapan cukup dipantau di rumah, kapan perlu dokter, dan kapan harus ke IGD.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
