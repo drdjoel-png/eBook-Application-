@@ -1,6 +1,6 @@
 {
   "name": "Panduan Interaktif Demam Anak",
-  "description": "Alat bantu edukasi interaktif untuk membantu Bunda menilai demam ananda: kapan cukup dipantau di rumah, kapan perlu dokter, dan kapan harus ke IGD.",
+  "description": "PediaCare: Panduan interaktif 3-in-1 untuk skrining demam, diare/muntah, dan batuk/sesak napas pada anak secara offline-first.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

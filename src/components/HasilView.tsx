@@ -7,894 +7,781 @@ import { useState } from 'react';
 import { 
   ChevronLeft, 
   RotateCcw, 
-  Share2, 
-  BookOpen, 
-  AlertOctagon, 
   Calculator, 
-  Heart, 
   Check, 
   ExternalLink,
-  Info
+  Info,
+  AlertTriangle,
+  Activity,
+  Droplets,
+  Thermometer,
+  Wind
 } from 'lucide-react';
-import { WizardData, RiskLevel, PARASETAMOL_OPTIONS, ParasetamolSediaan } from '../types';
+import { WizardData, PARASETAMOL_OPTIONS } from '../types';
 
 interface HasilViewProps {
+  lang: 'id' | 'en';
   wizardData: WizardData;
   onReset: () => void;
+  onBack: () => void;
 }
 
-export default function HasilView({ wizardData, onReset }: HasilViewProps) {
-  // 1. Calculate Risk Level based on rules
-  const getRiskLevel = (): RiskLevel => {
-    const { respons, napas, minumBak, tandaLain } = wizardData.tandaBahaya;
-    
-    // 🔴 SEGera KE IGD: If any danger sign is "ADA"
-    if (respons === 'ADA' || napas === 'ADA' || minumBak === 'ADA' || tandaLain === 'ADA') {
-      return 'MERAH';
-    }
+export default function HasilView({ lang, wizardData, onReset, onBack }: HasilViewProps) {
+  const [selectedSediaan, setSelectedSediaan] = useState<'DROPS_100' | 'SIRUP_120' | 'SIRUP_160' | 'SIRUP_250' | 'TIDAK_YAKIN'>('SIRUP_120');
 
-    const suhuNum = parseFloat(wizardData.suhu) || 0;
-    const isDemamLama = wizardData.lamaDemam === '3_HARI_LEBIH' || wizardData.lamaDemam === 'LEBIH_5_HARI_NAIK_TURUN';
-    
-    // 🟠 PERIKSA DOKTER HARI INI: Suhu >= 39.5 or Demam >= 3 days or climb-fall
-    if (suhuNum >= 39.5 || isDemamLama) {
-      return 'ORANYE';
-    }
+  const selectedModule = wizardData.selectedModule || 'DEMAM';
 
-    // 🟡 WASPADA: Suhu 38.5 - 39.4 (and < 3 days) or has seizure risk (or unsure)
-    const isHigherSuhu = suhuNum >= 38.5; // (since we didn't trigger ORANYE >= 39.5, this covers 38.5 - 39.4)
-    const isKejangRisk = wizardData.riwayatKejang === 'PERNAH' || wizardData.riwayatKejang === 'TIDAK_YAKIN';
-    
-    if (isHigherSuhu || isKejangRisk) {
-      return 'KUNING';
-    }
+  // -----------------------------------------------------------------
+  // CLASSIFICATION OF CLINICAL RISKS
+  // -----------------------------------------------------------------
 
-    // 🟢 PANTAU DI RUMAH: All normal / subfebris, < 3 days, no danger, no seizure history
-    return 'HIJAU';
+  // 1. MODULE 1: MUNTAH / DIARE
+  const isMdRed = (): boolean => {
+    const { letargis, mataCekung, muntahSemua, tidakPipis } = wizardData.mdTandaBahaya;
+    return letargis === 'ADA' || mataCekung === 'ADA' || muntahSemua === 'ADA' || tidakPipis === 'ADA';
+  };
+  const isMdOrange = (): boolean => {
+    const years = parseInt(wizardData.mdUsiaTahun) || 0;
+    const months = parseInt(wizardData.mdUsiaBulan) || 0;
+    const totalMonths = years * 12 + months;
+    const isFontanelleCekung = totalMonths < 18 && wizardData.mdUbunUbun === 'CEKUNG';
+
+    return !isMdRed() && (
+      wizardData.mdResponsMinum === 'HAUS' || 
+      wizardData.mdResponsMinum === 'MALAS_MINUM' ||
+      wizardData.mdKondisiMata === 'CEKUNG' || 
+      isFontanelleCekung
+    );
+  };
+  const isMdGreen = (): boolean => {
+    return !isMdRed() && !isMdOrange();
   };
 
-  const risk = getRiskLevel();
-
-  // Age label warning check (usia > 5 tahun)
-  const isOverAgeRange = (): boolean => {
-    const yrs = typeof wizardData.usiaTahun === 'number' ? wizardData.usiaTahun : 0;
-    const mths = typeof wizardData.usiaBulan === 'number' ? wizardData.usiaBulan : 0;
-    const totalMonths = (yrs * 12) + mths;
-    return totalMonths > 60; // 5 years old is 60 months
+  // 2. MODULE 2: BATUK / SESAK
+  const isBsRed = (): boolean => {
+    const { sianosis, stridor, tarikanDindingDada, tidakMauMinum } = wizardData.bsTandaBahaya;
+    return sianosis === 'ADA' || stridor === 'ADA' || tarikanDindingDada === 'ADA' || tidakMauMinum === 'ADA';
+  };
+  const getIsBsTachypnea = (): boolean => {
+    const rate = wizardData.bsLajuNapas;
+    if (wizardData.bsUsiaGroup === 'KURANG_2_BULAN') return rate >= 60;
+    if (wizardData.bsUsiaGroup === '2_11_BULAN') return rate >= 50;
+    if (wizardData.bsUsiaGroup === '1_5_TAHUN') return rate >= 40;
+    return false;
+  };
+  const isBsOrange = (): boolean => {
+    return !isBsRed() && (getIsBsTachypnea() || wizardData.bsSuaraMengi === 'YA' || wizardData.bsDurasi === 'LEBIH_14_HARI');
+  };
+  const isBsGreen = (): boolean => {
+    return !isBsRed() && !isBsOrange();
   };
 
-  // Convert measurement site to friendly text
-  const getCaraUkurLabel = (): string => {
-    switch (wizardData.caraUkur) {
-      case 'KETIAK': return 'Ketiak';
-      case 'DAHI': return 'Dahi';
-      case 'TELINGA': return 'Telinga';
-      case 'REKTAL': return 'Rektal (Anus)';
-      default: return 'Tidak yakin / lupa';
-    }
+  // 3. MODULE 3: DEMAM
+  const isDemamRed = (): boolean => {
+    const { kejangAktif, kakuKuduk, kesadaranMenurun, bintikMerah } = wizardData.demamTandaBahaya;
+    return kejangAktif === 'ADA' || kakuKuduk === 'ADA' || kesadaranMenurun === 'ADA' || bintikMerah === 'ADA';
+  };
+  const isDemamOrange = (): boolean => {
+    const suhuNum = parseFloat(wizardData.demamSuhu) || 0;
+    return !isDemamRed() && (
+      suhuNum >= 39.0 || 
+      wizardData.demamLama === '3_HARI_LEBIH' || 
+      wizardData.demamRiwayatKejang === 'PERNAH' ||
+      wizardData.demamUsiaGroup === 'KURANG_3_BULAN'
+    );
+  };
+  const isDemamGreen = (): boolean => {
+    return !isDemamRed() && !isDemamOrange();
   };
 
-  // Convert fever duration to friendly Indonesian text
-  const getFeverDurationLabel = (): string => {
-    switch (wizardData.lamaDemam) {
-      case 'KURANG_24_JAM': return 'Baru mulai hari ini (< 24 jam)';
-      case '1_2_HARI': return '1 - 2 hari';
-      case '3_HARI_LEBIH': return '3 hari atau lebih';
-      case 'LEBIH_5_HARI_NAIK_TURUN': return 'Lebih dari 5 hari / naik-turun lama';
-      default: return '-';
-    }
+  // 4. OVERALL RESOLVED COLOR PATHWAY
+  const isJalurMerah = (selectedModule === 'MUNTAH_DIARE' && isMdRed()) ||
+                       (selectedModule === 'BATUK_SESAK' && isBsRed()) ||
+                       (selectedModule === 'DEMAM' && isDemamRed());
+
+  const isJalurOranye = (selectedModule === 'MUNTAH_DIARE' && isMdOrange()) ||
+                         (selectedModule === 'BATUK_SESAK' && isBsOrange()) ||
+                         (selectedModule === 'DEMAM' && isDemamOrange());
+
+  const isJalurHijau = (selectedModule === 'MUNTAH_DIARE' && isMdGreen()) ||
+                       (selectedModule === 'BATUK_SESAK' && isBsGreen()) ||
+                       (selectedModule === 'DEMAM' && isDemamGreen());
+
+  // -----------------------------------------------------------------
+  // COUPLER FORMULATIONS PREPARATIONS
+  // -----------------------------------------------------------------
+
+  // Oralit calculation
+  const getOralitCalc = () => {
+    const bb = parseFloat(wizardData.mdBeratBadan) || 10;
+    const vol = Math.round(75 * bb);
+    const sachets = Math.ceil(vol / 200);
+    const water = sachets * 200;
+    return { vol, sachets, water };
   };
+  const oralit = getOralitCalc();
 
-  // State for Parasetamol calculation
-  const [bbInput, setBbInput] = useState<string>('');
-  const [selectedSediaan, setSelectedSediaan] = useState<string>('DROPS_100');
-  const [calculatedDose, setCalculatedDose] = useState<{ mg: number; ml: number | null } | null>(null);
-  const [bbError, setBbError] = useState<string | null>(null);
+  // Parasetamol calculations for Demam
+  const getParacetamolCalc = () => {
+    const bb = parseFloat(wizardData.demamBeratBadan) || 10;
+    const mgMin = Math.round(10 * bb);
+    const mgMax = Math.round(15 * bb);
 
-  const calculateDose = (bbValue: string, sediaanId: string) => {
-    setBbError(null);
-    if (!bbValue.trim()) {
-      setBbError('Berat badan diperlukan untuk menghitung dosis parasetamol dengan aman.');
-      setCalculatedDose(null);
-      return;
+    const activeOption = PARASETAMOL_OPTIONS.find(o => o.id === selectedSediaan);
+    if (!activeOption || activeOption.id === 'TIDAK_YAKIN') {
+      return { mgMin, mgMax, mlMin: null, mlMax: null, activeOption };
     }
-
-    const bbNum = parseFloat(bbValue.replace(',', '.'));
-    if (isNaN(bbNum) || bbNum <= 0) {
-      setBbError('Angka berat badan harus berupa angka positif yang valid.');
-      setCalculatedDose(null);
-      return;
-    }
-
-    const sediaan = PARASETAMOL_OPTIONS.find(o => o.id === sediaanId);
-    if (!sediaan) return;
-
-    // Dosis mg = berat badan * 10 mg
-    const dosageMg = bbNum * 10;
-    let dosageMl: number | null = null;
-
-    if (sediaan.mgPerMl > 0) {
-      dosageMl = dosageMg / sediaan.mgPerMl;
-    }
-
-    setCalculatedDose({
-      mg: parseFloat(dosageMg.toFixed(2)),
-      ml: dosageMl !== null ? parseFloat(dosageMl.toFixed(2)) : null
-    });
+    const conc = activeOption.mgPerMl;
+    const mlMin = (mgMin / conc).toFixed(1);
+    const mlMax = (mgMax / conc).toFixed(1);
+    return { mgMin, mgMax, mlMin, mlMax, activeOption };
   };
+  const para = getParacetamolCalc();
 
-  const handleBbChange = (e: string) => {
-    setBbInput(e);
-    calculateDose(e, selectedSediaan);
-  };
-
-  const handleSediaanChange = (e: string) => {
-    setSelectedSediaan(e);
-    calculateDose(bbInput, e);
-  };
-
-  // 2. Generate WhatsApp share message content
-  const generateWhatsAppShare = () => {
-    const riskTitle = {
-      HIJAU: '🟢 PANTAU DI RUMAH',
-      KUNING: '🟡 WASPADA',
-      ORANYE: '🟠 PERIKSA DOKTER HARI INI',
-      MERAH: '🔴 SEGERA KE IGD'
-    }[risk];
-
-    let alasanText = '';
-    let tindakanText = '';
-    
-    if (risk === 'HIJAU') {
-      alasanText = 'Suhu ananda belum termasuk demam tinggi, demam belum berlangsung lama, dan tidak ada tanda bahaya yang Bunda pilih di awal.';
-      tindakanText = [
-        '• Pantau suhu dan kondisi ananda secara berkala',
-        '• Pastikan ananda mendapatkan asupan cairan yang cukup',
-        '• Biarkan ananda beristirahat di ruangan nyaman',
-        '• Ulangi penilaian bila suhu naik atau kondisi anak berubah',
-        '• Tidak perlu memaksa suhu sampai normal bila ananda masih aktif/tampak nyaman'
-      ].join('\n');
-    } else if (risk === 'KUNING') {
-      alasanText = `Suhu ananda sudah masuk demam (${wizardData.suhu}°C), tetapi belum ada tanda bahaya berat dan demam baru berlangsung singkat (< 3 hari).`;
-      if (wizardData.riwayatKejang === 'PERNAH') {
-        alasanText += ' *Ananda memiliki riwayat kejang saat demam sebelumnya, sehingga butuh pemantauan ekstra.*';
-      } else if (wizardData.riwayatKejang === 'TIDAK_YAKIN') {
-        alasanText += ' *Kondisi riwayat kejang demam ananda belum pasti, disarankan dipantau dengan lebih hati-hati.*';
-      }
-      tindakanText = [
-        '• Pantau suhu dan kondisi ananda berkala setiap beberapa jam',
-        '• Pastikan ananda tetap mau minum cairan',
-        '• Jangan hanya berfokus pada angka termometer, melainkan respons anak',
-        '• Parasetamol dapat dipertimbangkan bila suhu >= 38.5°C dan ananda merasa kurang nyaman',
-        '• Ulangi penilaian secara berkala. Jika demam naik terus, atau ananda tampak lemas, segera periksa ke dokter.'
-      ].join('\n');
-    } else if (risk === 'ORANYE') {
-      alasanText = `Suhu ananda cukup tinggi (${wizardData.suhu}°C), demam sudah berlangsung selama ${getFeverDurationLabel()}, atau demam bertahan naik-turun cukup lama.`;
-      if (parseFloat(wizardData.suhu) >= 40) {
-        alasanText += ' \n🚨 *Suhu ananda sangat tinggi (>= 40°C). Segera jadwalkan pemeriksaan dokter.*';
-      }
-      tindakanText = [
-        '• Rencanakan pemeriksaan dokter atau ke pusat kesehatan hari ini juga',
-        '• Tetap pantau respons ananda, pola napas, warna bibir, dan asupan minum/BAK',
-        '• Berikan cairan sedikit demi sedikit tetapi sering agar terhindar dari dehidrasi',
-        '• Parasetamol dapat dipertimbangkan jika suhu >= 38.5°C agar ananda lebih nyaman',
-        '• Jangan menunda ke dokter hanya karena suhu sempat turun setelah minum obat'
-      ].join('\n');
-    } else if (risk === 'MERAH') {
-      alasanText = 'Bunda memilih adanya tanda bahaya klinis yang memerlukan tindakan cepat dan pengawasan dokter segera.';
-      tindakanText = [
-        '⚠️ Jangan menunggu demamnya turun terlebih dahulu!',
-        '• Bawa ananda sesegera mungkin ke IGD rumah sakit terdekat',
-        '• Jika terjadi kejang, sesak napas berat, atau bibir kebiruan, cari pertolongan darurat segera',
-        '• Jangan memaksa memberi makan/minum jika kesadaran ananda tampak menurun',
-        '• Siapkan catatan: suhu terakhir, lama demam, obat yang sudah diminum'
-      ].join('\n');
-    }
-
-    let parasetamolSection = '';
-    const suhuNum = parseFloat(wizardData.suhu) || 0;
-    if (risk !== 'MERAH' && suhuNum >= 38.5 && calculatedDose) {
-      const activeSediaan = PARASETAMOL_OPTIONS.find(o => o.id === selectedSediaan);
-      const sediaanLabel = activeSediaan ? activeSediaan.label : '';
-      
-      parasetamolSection = `💊 *Estimasi Parasetamol (Saran Awal):*
-• Berat Badan: ${bbInput} kg
-• Sediaan: ${sediaanLabel}
-• Dosis: ${calculatedDose.mg} mg per kali minum
-${calculatedDose.ml !== null ? `• Setara: ${calculatedDose.ml} mL tiap kali minum` : '• Hubungi apoteker/dokter untuk takaran mL obat Anda'}
-• Aturan: Dapat diberikan tiap 4-6 jam jika perlu (max 4x dalam 24 jam). Gunakan spuit obat agar takaran presisi.
-`;
-    }
-
-    const ageWarning = isOverAgeRange() 
-      ? '⚠️ *Catatan*: Hasil ini bersifat panduan umum karena usia ananda di luar target utama (1-5 tahun).' 
-      : '';
-
-    const textPayload = `🩺 *RINGKASAN PANDUAN DEMAM ANANDA* 🩺
-
-*LEVEL RISIKO:*
-${riskTitle}
-${ageWarning ? `\n${ageWarning}\n` : ''}
-----------------------------------------
-
-👤 *Data Ananda:*
-• Usia: ${wizardData.usiaTahun} tahun ${wizardData.usiaBulan ? `${wizardData.usiaBulan} bulan` : ''}
-• Suhu: ${wizardData.suhu}°C (diukur di ${getCaraUkurLabel()})
-• Riwayat Kejang: ${wizardData.riwayatKejang === 'PERNAH' ? 'Pernah' : wizardData.riwayatKejang === 'TIDAK_PERNAH' ? 'Tidak pernah' : 'Tidak yakin/lupa'}
-
-----------------------------------------
-
-📋 *Alasan Hasil Ini:*
-${alasanText}
-
-----------------------------------------
-
-💡 *Langkah Penting Sekarang:*
-${tindakanText}
-
-${parasetamolSection ? `----------------------------------------\n${parasetamolSection}\n` : ''}----------------------------------------
-
-🚨 *Segera ke IGD jika:*
-Kejang, napas berat/tersengal, sangat lemas/sulit dibangunkan, tidak mau minum sama sekali, air kencing berkurang drastis, bibir kebiruan, atau muncul ruam kemerahan/keunguan.
-
-----------------------------------------
-_Edukasi ini bersifat awal & bukan pengganti pemeriksaan dokter langsung._
-
-📘 *Rekomendasi Buku dr. Zulia Ahmad Burhani, SpA:*
-1. "Saat Anak Sakit di Rumah" (Demam, Kejang, Diare):
-   👉 https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Saat_Anak_Sakit_di_Ruma?id=w-TIEQAAQBAJ
-
-2. "Batuk, Pilek atau Sesak pada Anak":
-   👉 https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Batuk_Pilek_atau_Sesak?id=29rJEQAAQBAJ`;
-
-    return `https://wa.me/?text=${encodeURIComponent(textPayload)}`;
-  };
-
-  // E-book component rendering helper
-  const renderEBooks = (isFooterPosition: boolean) => {
-    const headerCopy = {
-      HIJAU: 'Walaupun saat ini belum tampak tanda bahaya, Bunda bisa membaca panduan lengkap agar lebih siap saat ananda sakit di rumah.',
-      KUNING: 'Ananda perlu dipantau lebih ketat. Bunda bisa membaca panduan lengkap agar tahu tanda apa yang perlu diperhatikan berikutnya.',
-      ORANYE: 'Ananda sebaiknya diperiksa dokter hari ini. E-book ini bisa membantu Bunda memahami tanda bahaya dan mencatat kondisi ananda sebelum diperiksa.',
-      MERAH: 'Saat ini prioritas utama adalah membawa ananda ke IGD atau fasilitas kesehatan. Setelah ananda mendapatkan pemeriksaan, Bunda bisa membaca panduan lengkap agar keluarga lebih siap menghadapi kondisi anak sakit berikutnya.'
-    }[risk];
-
+  // -----------------------------------------------------------------
+  // GAWAT DARURAT INTERRUPTER SCREEN (Fullscreen red safety shield)
+  // -----------------------------------------------------------------
+  if (isJalurMerah) {
     return (
-      <div className={`mt-8 space-y-4 ${isFooterPosition ? 'border-t border-slate-100 pt-6 opacity-90' : ''}`} id="recommended-books-section">
-        <div>
-          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase block mb-1">Rekomendasi Buku</span>
-          <h3 className="font-display font-bold text-sm text-slate-800">
-            E-Book dr. Zulia Ahmad Burhani, SpA
-          </h3>
-          <p className="text-slate-500 text-[10.5px] mt-1 leading-relaxed">
-            {headerCopy}
+      <div className="fixed inset-0 bg-red-650 z-[9999] flex flex-col items-center justify-center text-center p-6 sm:p-12 text-white animate-fade-in" id="jalur-merah-fullscreen">
+        <div className="max-w-2xl mx-auto space-y-6 flex flex-col items-center justify-center">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white/10 rounded-full flex items-center justify-center text-5xl animate-pulse mb-2 border border-white/20 select-none">
+            ⚠️
+          </div>
+          <h1 className="font-display font-black text-2xl sm:text-4xl tracking-tight leading-normal max-w-xl text-center">
+            {lang === 'id' ? '⚠️ SEGERA BAWA ANANDA KE IGD.' : '⚠️ IMMEDIATELY TAKE YOUR CHILD TO THE EMERGENCY ROOM.'}
+          </h1>
+          <p className="text-sm sm:text-lg text-red-100 leading-relaxed font-semibold max-w-lg text-center bg-black/10 p-5 rounded-2xl border border-white/5">
+            {lang === 'id' 
+              ? 'Ditemukan tanda bahaya gawat darurat medis pada pemeriksaan ananda. Mohon jangan tunda dan segera menuju ke IGD rumah sakit terdekat untuk pertolongan medis.' 
+              : "Emergency alert active. Your child shows signs of acute physiological crisis. Go to the nearest Hospital ER department immediately without waiting."}
           </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3.5">
-          {/* Cover Book 1: Saat Anak Sakit di Rumah */}
-          <a
-            href="https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Saat_Anak_Sakit_di_Ruma?id=w-TIEQAAQBAJ"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative bg-[#FAF8F5] border border-slate-200/60 rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_12px_24px_rgba(0,0,0,0.07)] hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden text-left"
-            aria-label="Buku Saat Anak Sakit di Rumah oleh dr Zulia Ahmad Burhani SpA"
-          >
-            {/* Book Spine Shadow and Page line effects */}
-            <div className="absolute left-0 top-0 bottom-0 w-3 bg-gradient-to-r from-black/15 via-black/5 to-transparent z-10" />
-            <div className="absolute left-[11px] top-0 bottom-0 w-[0.5px] bg-white/15 z-10" />
-            <div className="absolute right-0 top-0 bottom-0 w-[1px] bg-black/5 z-10" />
-
-            {/* Real Cover Image */}
-            <div className="relative aspect-[3/4.2] w-full overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center shrink-0 border-b border-slate-100">
-              <img
-                src="/cover_sakit_di_rumah.jpg"
-                alt="Buku Saat Anak Sakit di Rumah"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-              />
-            </div>
-
-            {/* Info Footer */}
-            <div className="p-3 flex-grow flex flex-col justify-between bg-white text-center">
-              <div className="space-y-0.5">
-                <h4 className="font-display font-extrabold text-[#1e293b] text-[10.5px] leading-tight line-clamp-1 uppercase tracking-tight">
-                  Saat Anak Sakit di Rumah
-                </h4>
-                <p className="text-[8.5px] text-slate-400 font-medium">dr. Zulia Ahmad, SpA</p>
-              </div>
-              <div className="mt-2.5 py-1 px-2.5 bg-brand-teal/10 rounded-lg group-hover:bg-brand-teal group-hover:text-white text-brand-teal-dark text-[9px] font-extrabold flex items-center justify-center gap-1 transition duration-200 shadow-xs">
-                <span>Buka E-Book</span>
-                <ExternalLink className="w-2.5 h-2.5" />
-              </div>
-            </div>
-          </a>
-
-          {/* Cover Book 2: Batuk, Pilek atau Sesak pada Anak */}
-          <a
-            href="https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Batuk_Pilek_atau_Sesak?id=29rJEQAAQBAJ"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative bg-[#F4F9FF] border border-slate-200/60 rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_12px_24px_rgba(0,0,0,0.07)] hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden text-left"
-            aria-label="Buku Batuk Pilek atau Sesak pada Anak oleh dr Zulia Ahmad Burhani SpA"
-          >
-            {/* Book Spine Shadow and Page line effects */}
-            <div className="absolute left-0 top-0 bottom-0 w-3 bg-gradient-to-r from-black/15 via-black/5 to-transparent z-10" />
-            <div className="absolute left-[11px] top-0 bottom-0 w-[0.5px] bg-white/15 z-10" />
-            <div className="absolute right-0 top-0 bottom-0 w-[1px] bg-black/5 z-10" />
-
-            {/* Real Cover Image */}
-            <div className="relative aspect-[3/4.2] w-full overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center shrink-0 border-b border-slate-100">
-              <img
-                src="/cover_batuk_pilek.jpg"
-                alt="Buku Batuk Pilek atau Sesak pada Anak"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-              />
-            </div>
-
-            {/* Info Footer */}
-            <div className="p-3 flex-grow flex flex-col justify-between bg-white text-center">
-              <div className="space-y-0.5">
-                <h4 className="font-display font-extrabold text-[#1e293b] text-[10.5px] leading-tight line-clamp-1 uppercase tracking-tight">
-                  Batuk, Pilek, Sesak Anak
-                </h4>
-                <p className="text-[8.5px] text-slate-400 font-medium">dr. Zulia Ahmad, SpA</p>
-              </div>
-              <div className="mt-2.5 py-1 px-2.5 bg-indigo-50 rounded-lg group-hover:bg-indigo-600 group-hover:text-white text-indigo-700 text-[9px] font-extrabold flex items-center justify-center gap-1 transition duration-200 shadow-xs">
-                <span>Buka E-Book</span>
-                <ExternalLink className="w-2.5 h-2.5" />
-              </div>
-            </div>
-          </a>
+          
+          <div className="pt-8 flex flex-col sm:flex-row gap-4 w-full p-2 justify-center select-none">
+            <button
+              onClick={onBack}
+              className="flex-1 py-3.5 px-6 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>{lang === 'id' ? 'Kembali' : 'Go Back'}</span>
+            </button>
+            <button
+              onClick={onReset}
+              className="flex-1 py-3.5 px-6 rounded-2xl bg-white text-rose-700 hover:bg-rose-50 text-xs sm:text-sm font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+            >
+              <RotateCcw className="w-4 h-4 text-rose-700" />
+              <span>{lang === 'id' ? 'Ulangi Cek' : 'Restart Checker'}</span>
+            </button>
+          </div>
         </div>
       </div>
     );
-  };
+  }
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 py-4 space-y-6 animate-fade-in pb-16" id="results-screen">
-      {/* Header Bar */}
-      <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-2">
-        <button
-          onClick={onReset}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-brand-teal transition"
-          id="back-to-wizard-btn"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          <span>Mulai Ulang</span>
-        </button>
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Langkah 6/6 · Hasil Penilaian</span>
-        <div className="w-16" />
+    <div className="w-full max-w-4xl mx-auto px-4 sm:px-8 py-6 flex flex-col gap-6 animate-fade-in" id="results-screen">
+      
+      {/* 1. HERO EVALUATION PATH TITLE BLOCK */}
+      <div className="p-6 rounded-[28px] text-left select-none shadow-sm bg-white border border-slate-150 flex flex-col gap-3" id="hasil-status-header">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="text-2xl sm:text-3xl shrink-0">
+              {isJalurOranye ? '⚠️' : '✅'}
+            </div>
+            <div>
+              {/* REMOVED WORD STATUS: */}
+              <h2 className={`font-display font-black text-lg sm:text-2xl uppercase tracking-tight ${
+                isJalurOranye ? 'text-amber-800' : 'text-emerald-700'
+              }`}>
+                {isJalurOranye 
+                  ? (lang === 'id' ? 'Perlu Observasi Ketat' : 'Strict Observation Required')
+                  : (lang === 'id' ? 'Aman Terkendali' : 'Under Control & Safe')
+                }
+              </h2>
+            </div>
+          </div>
+
+          {/* BADGE AS DEMANDED BY USER */}
+          <div>
+            {isJalurOranye ? (
+              <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-amber-50 border border-amber-200 text-amber-800 font-display font-black text-xs uppercase shadow-3xs">
+                <span>🟡</span>
+                <span>{lang === 'id' ? 'Perlu Pemeriksaan Dokter' : 'Doctor Consultation Needed'}</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-display font-black text-xs uppercase shadow-3xs">
+                <span>🟢</span>
+                <span>{lang === 'id' ? 'Aman Terkendali' : 'Safe to Monitor at Home'}</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        <p className="text-xs sm:text-sm text-slate-500 font-semibold leading-relaxed border-t border-slate-100 pt-3">
+          {isJalurOranye 
+            ? (lang === 'id' ? 'Kondisi ananda memerlukan tindakan asuhan waspada. Beberapa parameter menandai tingginya resiko komplikasi. Perhatikan tatalaksana pencegahan penularan di bawah.' : 'Your child requires strict caution. Several parameters trigger a clinical care alert. Review the details below.')
+            : (lang === 'id' ? 'Kondisi ananda stabil, terbebas dari ancaman tanda bahaya dehidrasi, sesak ataupun infeksi berat. Rawat mandiri di rumah menggunakan panduan asuhan berikut.' : 'Your child exhibits stable baseline physiological indicators. You can safely support them at home with the following guidelines.')
+          }
+        </p>
       </div>
 
-      {/* RATING BADGE AGE EXCLUSION ADVISORIES */}
-      {isOverAgeRange() && (
-        <div className="p-3.5 bg-amber-55/70 border border-amber-200 text-amber-800 rounded-2xl flex items-start gap-3 text-xs font-medium">
-          <Info className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
-          <div className="space-y-0.5 text-left">
-            <p className="font-bold font-display text-[11px] uppercase tracking-wide">Panduan Umum</p>
-            <p className="text-amber-750 text-[10px] leading-relaxed">
-              Usia ananda di luar target utama (1–5 tahun). Karena usia ananda di luar target utama, hasil ini sebaiknya dibaca sebagai arahan umum saja.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Thermometer measurement type alert */}
-      {wizardData.caraUkur === 'TIDAK_YAKIN' && (
-        <div className="p-3.5 bg-slate-50 border border-slate-200 text-slate-700 rounded-2xl flex items-start gap-3 text-xs font-medium">
-          <Info className="w-4 h-4 shrink-0 text-slate-500 mt-0.5" />
-          <div className="space-y-0.5 text-left">
-            <p className="font-bold font-display text-[11px] uppercase tracking-wide">Pengukuran Tidak Pasti</p>
-            <p className="text-slate-650 text-[10px] leading-relaxed">
-              Karena cara ukur suhu tidak dipastikan, angka suhu ({wizardData.suhu}°C) perlu dibaca dengan hati-hati. Tetap perhatikan kondisi ananda secara keseluruhan, bukan hanya angka suhu.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* 2. CHOOSE CORRESPONDING DIAGNOSTIC CARD BASED ON TRIAJE */}
-      {risk === 'HIJAU' && (
-        <div className="bg-white rounded-2xl border border-pastel-green-bg shadow-[0_4px_16px_rgba(46,125,50,0.04)] overflow-hidden" id="card-hijau">
-          <div className="p-4 bg-pastel-green-bg text-pastel-green-text flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center font-display font-extrabold text-base shadow-sm shrink-0">
-              🟢
-            </div>
-            <div>
-              <h2 className="font-display font-extrabold text-sm">Pantau di Rumah</h2>
-              <p className="text-emerald-800 text-[9.5px] opacity-90">Kondisi stabil tanpa red-flags</p>
-            </div>
-          </div>
-          <div className="p-4 space-y-3">
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kesimpulan</h4>
-              <p className="text-slate-700 text-xs font-medium leading-relaxed">
-                Saat ini belum tampak tanda bahaya dari jawaban Bunda. Ananda dapat dipantau di rumah sambil tetap memperhatikan perkembangan kondisi ke depannya.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kenapa hasil ini muncul?</h4>
-              <p className="text-slate-600 text-xs leading-relaxed">
-                Suhu ananda ({wizardData.suhu}°C dengan lokasi {getCaraUkurLabel()}) belum termasuk demam tinggi, demam belum berlangsung lama, dan tidak ada tanda bahaya yang Bunda pilih di awal.
-              </p>
-            </div>
-
-            <div className="border-t border-slate-100 pt-2.5">
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1.5">Apa yang perlu dilakukan sekarang?</h4>
-              <ul className="space-y-2 text-xs text-slate-600">
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Pantau suhu tubuh dan kondisi fisik ananda berkala sehari 3-4 kali.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Pastikan ananda cukup minum air putih, ASI, kuah sup, atau cairan pelengkap.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Biarkan ananda beristirahat dan gunakan pakaian tipis/ruangan sejuk.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Ulangi penilaian ini bila suhu badan naik lagi atau kondisi memburuk.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Tidak perlu mengejar suhu harus kembali ke 36.5°C jika ananda masih tampak aktif, nyaman, dan mau bermain.</span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-xl">
-              <h5 className="font-display font-bold text-xs text-rose-800 flex items-start gap-2 mb-1">
-                <AlertOctagon className="w-3.5 h-3.5 text-rose-700 shrink-0 mt-0.5 animate-pulse" />
-                <span>Segera ke IGD bila:</span>
-              </h5>
-              <p className="text-rose-700 text-[10px] leading-relaxed pl-5.5">
-                Kejang, napas berat / sesak, sangat lemas, sulit dibangunkan, tidak mau minum sama sekali, BAK sangat sedikit, bibir kebiruan, atau timbul ruam merah keunguan di kulit.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {risk === 'KUNING' && (
-        <div className="bg-white rounded-2xl border border-pastel-yellow-bg shadow-[0_4px_16px_rgba(245,127,23,0.04)] overflow-hidden" id="card-kuning">
-          <div className="p-4 bg-pastel-yellow-bg text-pastel-yellow-text flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center font-display font-extrabold text-base shadow-sm shrink-0">
-              🟡
-            </div>
-            <div>
-              <h2 className="font-display font-extrabold text-sm">Waspada</h2>
-              <p className="text-yellow-900 text-[9.5px] opacity-90">Pemantauan Mandiri Lebih Ketat</p>
-            </div>
-          </div>
-          <div className="p-4 space-y-3">
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kesimpulan</h4>
-              <p className="text-slate-700 text-xs font-semibold leading-relaxed">
-                Saat ini belum tampak tanda bahaya dari jawaban Bunda, tetapi ananda perlu dipantau lebih ketat karena beberapa faktor penyerta.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kenapa hasil ini muncul?</h4>
-              <p className="text-slate-600 text-xs leading-relaxed">
-                Suhu ananda ({wizardData.suhu}°C) sudah tergolong demam/suhu meningkat, tetapi belum ada tanda bahaya klinis berat dan demam berlangsung kurang dari 3 hari.
-              </p>
-              {wizardData.riwayatKejang === 'PERNAH' && (
-                <div className="p-2.5 bg-yellow-50/70 border border-yellow-100 rounded-xl text-[10px] text-yellow-950 font-medium mt-1 leading-relaxed flex items-start gap-2">
-                  <AlertOctagon className="w-3.5 h-3.5 text-yellow-700 shrink-0 mt-0.5" />
-                  <span><strong>Advisory Kejang</strong>: Ananda memiliki riwayat kejang saat demam. Saat ini belum ada tanda bahaya dari jawaban Bunda, tetapi pemantauan suhu perlu lebih ketat.</span>
-                </div>
-              )}
-              {wizardData.riwayatKejang === 'TIDAK_YAKIN' && (
-                <div className="p-2.5 bg-yellow-50/70 border border-yellow-100 rounded-xl text-[10px] text-yellow-950 font-medium mt-1 leading-relaxed flex items-start gap-2">
-                  <AlertOctagon className="w-3.5 h-3.5 text-yellow-700 shrink-0 mt-0.5" />
-                  <span><strong>Advisory Kejang</strong>: Bunda tidak yakin apakah ananda pernah kejang saat demam sebelumnya. Karena itu, pemantauan perlu lebih hati-hati.</span>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-slate-100 pt-2.5">
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1.5">Apa yang perlu dilakukan sekarang?</h4>
-              <ul className="space-y-2 text-xs text-slate-600">
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                  <span>Pantau suhu serta perilaku respons anak berkala minimal tiap 4 jam.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                  <span>Pastikan ananda tetap mendapatkan asupan sediaan cairan/minuman sedikit demi sedikit.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                  <span>Jangan hanya terpaku pada angka suhu saja, amati pula aktivitasnya.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                  <span>Parasetamol melalu takaran aman dapat dipertimbangkan apabila suhu ≥38,5°C dan ananda tampak rewel atau tidak nyaman.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                  <span>Ulangi penilaian mandiri ini bila demamnya terus naik atau Bunda mulai merasa bimbang.</span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-xl">
-              <h5 className="font-display font-bold text-xs text-rose-800 flex items-start gap-2 mb-1">
-                <AlertOctagon className="w-3.5 h-3.5 text-rose-700 shrink-0 mt-0.5 animate-pulse" />
-                <span>Segera ke IGD bila:</span>
-              </h5>
-              <p className="text-rose-700 text-[10px] leading-relaxed pl-5.5">
-                Kejang, kejang berulang, sulit sadar kembali (mengantuk berat), napas berat/tersengal, sangat lemas, sulit dibangunkan, tidak mau minum sama sekali, atau ruam merah keunguan mendadak.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {risk === 'ORANYE' && (
-        <div className="bg-white rounded-2xl border border-pastel-orange-bg shadow-[0_4px_16px_rgba(230,81,0,0.04)] overflow-hidden" id="card-oranye">
-          <div className="p-4 bg-pastel-orange-bg text-pastel-orange-text flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center font-display font-extrabold text-base shadow-sm shrink-0">
-              🟠
-            </div>
-            <div>
-              <h2 className="font-display font-extrabold text-sm">Periksa Dokter Hari Ini</h2>
-              <p className="text-orange-950 text-[9.5px] opacity-90">Evaluasi Medis Dianjurkan Segera</p>
-            </div>
-          </div>
-          <div className="p-4 space-y-3">
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kesimpulan</h4>
-              <p className="text-slate-800 text-xs font-bold leading-relaxed">
-                Ananda sebaiknya diperiksa dokter hari ini. Saat ini belum ada tanda bahaya berat yang terdeteksi dari jawaban Bunda, tetapi kondisi demamnya perlu dievaluasi langsung oleh medis.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kenapa hasil ini muncul?</h4>
-              <p className="text-slate-600 text-xs leading-relaxed space-y-1">
-                <span>Hasil ini muncul karena suhu ananda relatif cukup tinggi ({wizardData.suhu}°C), demam sudah berlangsung selama {getFeverDurationLabel()}, atau pola fluktuasi naik-turun bertahan cukup lama.</span>
-              </p>
-              {parseFloat(wizardData.suhu) >= 40 && (
-                <div className="p-2.5 bg-red-50 text-red-800 border border-red-100 rounded-xl text-[10px] mt-1 font-semibold flex items-start gap-2">
-                  <AlertOctagon className="w-3.5 h-3.5 text-red-700 shrink-0 mt-0.5 animate-pulse" />
-                  <span><strong>Hiperpireksia Alert</strong>: Suhu ananda termasuk sangat tinggi (≥40°C). Walaupun belum ada tanda bahaya berat, pemeriksaan dokter hari ini sebaiknya jangan ditunda.</span>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-slate-100 pt-2.5">
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1.5">Apa yang perlu dilakukan sekarang?</h4>
-              <ul className="space-y-2 text-xs text-slate-650">
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
-                  <span className="font-semibold text-slate-800">Rencanakan pemeriksaan ke dokter atau puskesmas pendaftaran hari ini juga.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
-                  <span>Tetap pantau respons, pola napas, warna bibir, kualitas minum, dan frekuensi berkemih.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
-                  <span>Berikan cairan sedikit-sedikit tapi sering demi menghindari dehidrasi atau muntah.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
-                  <span>Parasetamol dapat dipertimbangkan jika suhu tubuh mencapai ≥38,5°C agar ananda dapat beristirahat lebih tenang.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
-                  <span className="text-orange-950 font-semibold">Jangan menunda pemeriksaan dokter hanya karena suhu sempat turun setelah minum obat demam.</span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-xl">
-              <h5 className="font-display font-bold text-xs text-rose-800 flex items-start gap-2 mb-1">
-                <AlertOctagon className="w-3.5 h-3.5 text-rose-700 shrink-0 mt-0.5 animate-pulse" />
-                <span>Segera ke IGD bila:</span>
-              </h5>
-              <p className="text-rose-700 text-[10px] leading-relaxed pl-5.5">
-                Kejang, napas tampak berat/sesak, sulit dibangunkan, anak tampak sangat lemas, tidak mau minum sama sekali, BAK sangat sedikit hingga kering, bibir kebiruan, atau ruam merah keunguan menyebar.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {risk === 'MERAH' && (
-        <div className="bg-white rounded-2xl border border-pastel-red-bg shadow-[0_4px_16px_rgba(198,40,40,0.04)] overflow-hidden" id="card-merah">
-          <div className="p-4 bg-pastel-red-bg text-pastel-red-text flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center font-display font-extrabold text-base shadow-sm shrink-0">
-              🚨
-            </div>
-            <div>
-              <h2 className="font-display font-extrabold text-sm text-red-800">Segera ke IGD</h2>
-              <p className="text-red-900 text-[9.5px] opacity-90">Memerlukan Penanganan Cepat Sekarang</p>
-            </div>
-          </div>
-          <div className="p-4 space-y-3">
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kesimpulan</h4>
-              <p className="text-red-950 text-xs font-bold leading-relaxed bg-red-50/70 p-3 rounded-xl border border-red-100">
-                Dari jawaban Bunda, ada tanda bahaya merah yang perlu diperiksa segera. Sebaiknya ananda segera dibawa ke IGD atau fasilitas kesehatan terdekat sekarang juga.
-              </p>
-            </div>
-
-            <div>
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Kenapa hasil ini muncul?</h4>
-              <p className="text-slate-600 text-xs leading-relaxed">
-                Hasil ini muncul karena Bunda mendeteksi adanya tanda-tanda yang dapat menunjukkan kondisi ananda tidak mencukupi dinilai secara mandiri melalui aplikasi handphone dan butuh visit langsung.
-              </p>
-            </div>
-
-            <div className="border-t border-slate-100 pt-2.5">
-              <h4 className="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1.5">Apa yang harus dilakukan sekarang?</h4>
-              <ul className="space-y-2 text-xs text-slate-705">
-                <li className="flex items-start gap-2.5 font-bold text-red-700">
-                  <AlertOctagon className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
-                  <span>Jangan menunggu obat bekerja atau demamnya turun dulu sebelum berangkat!</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-                  <span>Bawa ananda ke instalasi gawat darurat (IGD) atau klinik rawat inap terdekat segera.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-                  <span>Bila ananda kejang aktif, sesak napas berat, tampak tidak sadar penuh, atau kulit membiru, cari bantuan transportasi aman tanpa menunda.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-                  <span>Jangan memaksa memberi suapan makan atau air minum jika ananda tampak sesak atau kesadarannya melemah demi mencegah tersedak.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-                  <span>Siapkan informasi penting: suhu tubuh terakhir, lama durasi demam, daftar obat yang sudah diminum, jam pemberiannya, dan kartu identitas ananda.</span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="pt-2 text-center border-t border-slate-50">
-              <p className="text-[10px] text-slate-400 italic">
-                Panduan ini membantu mengenali tanda bahaya dengan cepat, bukan menggantikan pemeriksaan komprehensif dokter.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. CHECKLIST KHUSUS HASIL MERAH */}
-      {risk === 'MERAH' && (
-        <div className="bg-slate-50 border border-slate-200 p-5 rounded-3xl space-y-3" id="checklist-merah-block">
-          <div className="flex items-start gap-2.5 text-slate-700">
-            <span className="text-sm mt-0.5">📋</span>
-            <h4 className="font-display font-bold text-xs text-[#1e293b] leading-relaxed">Sambil bersiap ke IGD, catat bila sempat:</h4>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[10.5px] text-slate-600 bg-white p-4 rounded-2xl border border-slate-100">
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Suhu tubuh terakhir</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Apakah ada kejang</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Demam sejak kapan</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Apakah napas berat</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Obat yang diberikan</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Minum terakhir kapan</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Jam terakhir obat</span>
-            </div>
-            <div className="flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>BAK terakhir kapan</span>
-            </div>
-            <div className="col-span-2 flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Ada ruam merah/keunguan atau tidak</span>
-            </div>
-            <div className="col-span-2 flex items-start gap-2">
-              <Check className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
-              <span>Keluhan lain: muntah, diare, batuk, sesak, dll.</span>
-            </div>
-          </div>
-
-          <p className="text-[10px] text-slate-500 leading-relaxed font-light">
-            Catatan sederhana di atas dapat sangat membantu dokter/perawat memahami kondisi darurat ananda secara lebih cepat. <strong>Bila kondisi ananda tampak sangat tidak stabil atau gawat, mohon jangan menunda keberangkatan hanya demi melengkapi catatan fisik ini.</strong>
-          </p>
-        </div>
-      )}
-
-      {/* 4. PARASETAMOL ESTIMATOR TOOL (NOT SHOWN ON RED/EMERGENCY RESULTS) */}
-      {risk !== 'MERAH' && (
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_4px_18px_rgba(0,0,0,0.015)] p-5 space-y-4" id="paracetamol-section">
-          <div className="flex items-start gap-2.5 border-b border-slate-50 pb-2.5">
-            <Calculator className="w-4 h-4 text-brand-teal shrink-0 mt-0.75" />
-            <h3 className="font-display font-extrabold text-sm text-slate-800">
-              Hitung Estimasi Dosis Parasetamol
+      {/* TWO COLUMN GRID CONTENT */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+        
+        {/* LEFT COLUMN: RINGKASAN JAWABAN BUNDA */}
+        <div className="bg-slate-50 rounded-3xl p-5 border border-slate-200/50 space-y-4 shadow-3xs" id="ringkasan-jawaban">
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-2 bg-transparent select-none">
+            <span className="text-lg">📋</span>
+            <h3 className="font-display font-black text-slate-800 text-xs sm:text-sm uppercase tracking-wide">
+              {lang === 'id' ? 'Ringkasan Jawaban Bunda' : 'Mother\'s Responses Summary'}
             </h3>
           </div>
 
-          <p className="text-slate-500 text-xs leading-relaxed">
-            Parasetamol dapat dipertimbangkan bila suhu ≥38,5°C dan ananda tampak tidak nyaman.
-          </p>
+          <div className="divide-y divide-slate-150 text-left text-xs text-slate-700" id="summary-items">
+            {/* MODULE 1: MUNTAH DIARE SUMMARY */}
+            {selectedModule === 'MUNTAH_DIARE' && (
+              <>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Gejala Utama:</span>
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">
+                    <Droplets className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                    <span>Muntah / Diare</span>
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Usia Anak:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.mdUsiaTahun || '0'} {lang === 'id' ? 'Tahun' : 'Years'} {wizardData.mdUsiaBulan || '0'} {lang === 'id' ? 'Bulan' : 'Months'}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Berat Badan:</span>
+                  <span className="font-extrabold text-slate-800">{wizardData.mdBeratBadan} kg</span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Durasi Sakit:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.mdDurasi === 'LEBIH_5_HARI' ? (lang === 'id' ? 'Kronis (≥ 5 Hari) 🟡' : 'Chronic (≥ 5 days) 🟡') : (lang === 'id' ? 'Akut (< 5 Hari)' : 'Acute (< 5 days)')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Frekuensi Harian:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.mdFrekuensi === 'SERING' ? (lang === 'id' ? 'Sering (≥ 4 kali) 🟡' : 'Severe (≥ 4 times) 🟡') : (lang === 'id' ? 'Jarang (1-3 kali)' : 'Mild (1-3 times)')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Respons Minum:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.mdResponsMinum === 'HAUS' ? (lang === 'id' ? 'Sangat Lahap (Sangat Haus) 🟡' : 'Greedy Thirst 🟡') :
+                     wizardData.mdResponsMinum === 'MALAS_MINUM' ? (lang === 'id' ? 'Malas Minum / Mogok 🟡' : 'Refusing Fluids 🟡') :
+                     (lang === 'id' ? 'Normal / Haus Biasa' : 'Normal')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Kelopak Kelopak Mata:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.mdKondisiMata === 'CEKUNG' ? (lang === 'id' ? 'Tampak Sayu / Cekung 🟡' : 'Sunken Kelopak 🟡') : (lang === 'id' ? 'Normal' : 'Normal')}
+                  </span>
+                </div>
+                {((parseInt(wizardData.mdUsiaTahun) || 0) * 12 + (parseInt(wizardData.mdUsiaBulan) || 0) < 18) && (
+                  <div className="py-2.5 flex justify-between gap-2">
+                    <span className="font-semibold text-slate-500">Ketegangan Ubun-Ubun:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {wizardData.mdUbunUbun === 'CEKUNG' ? (lang === 'id' ? 'Ubun-Ubun Cekung 🟡' : 'Sunken Fontanelle 🟡') : (lang === 'id' ? 'Normal / Rata' : 'Normal')}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
 
-          {parseFloat(wizardData.suhu) < 38.5 ? (
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-[11px] text-slate-600 leading-relaxed flex items-start gap-2.5">
-              <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-              <span><strong>Rekomendasi</strong>: Saat ini aplikasi belum menyarankan perhitungan dosis parasetamol karena suhu tubuh ananda belum mencapai 38,5°C ({wizardData.suhu}°C). Fokus utama kita saat ini adalah memantau kondisi ananda, memberikan cairan yang cukup, serta mengulangi pengukuran suhu berkala bila ananda tampak semakin rewel atau hangat.</span>
-            </div>
-          ) : (
-            <div className="space-y-4 animate-fade-in">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {/* Body weight */}
-                <div>
-                  <label htmlFor="bb-input" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Berat Badan Anak (kg) *
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="bb-input"
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Contoh: 12"
-                      value={bbInput}
-                      onChange={(e) => handleBbChange(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-brand-teal rounded-xl py-2.5 px-3 text-xs text-slate-800 outline-none transition"
-                    />
-                    <span className="absolute right-3.5 top-2.5 text-slate-400 text-xs pointer-events-none">kg</span>
+            {/* MODULE 2: BATUK SESAK SUMMARY */}
+            {selectedModule === 'BATUK_SESAK' && (
+              <>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Gejala Utama:</span>
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">
+                    <Wind className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                    <span>Batuk / Sesak</span>
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Kelompok Usia:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.bsUsiaGroup === 'KURANG_2_BULAN' ? (lang === 'id' ? 'Di bawah 2 Bulan' : '< 2 Months') :
+                     wizardData.bsUsiaGroup === '2_11_BULAN' ? (lang === 'id' ? 'Lahir 2-11 Bulan' : '2-11 Months') :
+                     (lang === 'id' ? 'Usia 1 - 5 Tahun' : '1-5 Years')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Berat Badan:</span>
+                  <span className="font-extrabold text-slate-800">{wizardData.bsBeratBadan} kg</span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Lama Sakit:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.bsDurasi === 'LEBIH_14_HARI' ? (lang === 'id' ? 'Kronis (≥ 14 Hari) 🟡' : 'Chronic (≥ 14 days) 🟡') : (lang === 'id' ? 'Akut (< 14 Hari)' : 'Acute (< 14 days)')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Laju Tarikan Napas:</span>
+                  <span className={`font-extrabold ${getIsBsTachypnea() ? 'text-amber-700 font-black' : 'text-slate-800'}`}>
+                    {wizardData.bsLajuNapas} x/menit {getIsBsTachypnea() && (lang === 'id' ? ' (Mencapai Napas Cepat! 🟡)' : ' (Rapid Tachypnea! 🟡)')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Suara Mengi (Menciut):</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.bsSuaraMengi === 'YA' ? (lang === 'id' ? 'Terdegar Mengi 🟡' : 'Audible Wheezing 🟡') : (lang === 'id' ? 'Tidak Terdengar' : 'None')}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {/* MODULE 3: DEMAM SUMMARY */}
+            {selectedModule === 'DEMAM' && (
+              <>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Gejala Utama:</span>
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">
+                    <Thermometer className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span>Anak Demam</span>
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Kategori Usia:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.demamUsiaGroup === 'KURANG_3_BULAN' ? (lang === 'id' ? 'Gawat Bayi < 3 Bulan 🟡' : 'Acute < 3 Months 🟡') :
+                     wizardData.demamUsiaGroup === '3_BULAN_5_TAHUN' ? (lang === 'id' ? 'Usia 3 Bulan s.d. 5 Tahun' : '3 Months to 5 Years') :
+                     (lang === 'id' ? 'Di atas 5 Tahun' : 'Above 5 Years')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Berat Badan:</span>
+                  <span className="font-extrabold text-slate-800">{wizardData.demamBeratBadan} kg</span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Suhu Tubuh Panas:</span>
+                  <span className={`font-extrabold ${parseFloat(wizardData.demamSuhu) >= 39.0 ? 'text-amber-800 font-extrabold' : 'text-slate-800'}`}>
+                    {wizardData.demamSuhu} °C {parseFloat(wizardData.demamSuhu) >= 39.0 && ' (Suhu Sangat Tinggi! 🟡)'}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Panas Berlangsung:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.demamLama === '3_HARI_LEBIH' ? (lang === 'id' ? 'Demam Berlarut (≥ 3 Hari) 🟡' : 'Prolonged (≥ 3 days) 🟡') :
+                     wizardData.demamLama === '1_2_HARI' ? (lang === 'id' ? 'Panas 1-2 Hari' : '1-2 Days') :
+                     (lang === 'id' ? 'Baru Mulai (< 24 Jam)' : '< 24 Hours')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Riwayat Kejang Demam:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.demamRiwayatKejang === 'PERNAH' ? (lang === 'id' ? 'Ada Riwayat Kejang 🟡' : 'History of seizure 🟡') :
+                     wizardData.demamRiwayatKejang === 'TIDAK_PERNAH' ? (lang === 'id' ? 'Tidak Pernah' : 'Never Had One') :
+                     (lang === 'id' ? 'Ragu / Kurang Tahu' : 'Unsure')}
+                  </span>
+                </div>
+                <div className="py-2.5 flex justify-between gap-2">
+                  <span className="font-semibold text-slate-500">Terakhir Antipiretik:</span>
+                  <span className="font-extrabold text-slate-800">
+                    {wizardData.demamTerakhirObat === 'KURANG_4_JAM' 
+                      ? (lang === 'id' ? 'Baru Minum (< 4 Jam lalu)' : 'Recently loaded (< 4h ago)') 
+                      : (lang === 'id' ? 'Belum / Sudah > 4 Jam' : 'None / Over 4h ago')
+                    }
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: REHIDRASI / DOSIS CALCULATORS + LOCKED PORTALS */}
+        <div className="space-y-6">
+          
+          {/* TRACK 1: ANAK MUNTAH / DIARE */}
+          {selectedModule === 'MUNTAH_DIARE' && (
+            <div className="space-y-5">
+              
+              <div className="relative bg-white border border-slate-150 rounded-3xl p-5 shadow-3xs overflow-hidden text-left" id="muntah-calc-box">
+                {/* BLUR ONLY IF ORANGE PATH */}
+                <div className={`space-y-4 ${isMdOrange() ? 'blur-[5px] select-none pointer-events-none opacity-40' : ''}`}>
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-2 select-none">
+                    <Calculator className="w-4.5 h-4.5 text-[#5FB7B9] shrink-0" />
+                    <span className="font-display font-black text-xs text-slate-800 uppercase tracking-widest">{lang === 'id' ? 'Kalkulator Kebutuhan Cairan (Rehidrasi)' : 'Rehydration Fluid Calculator'}</span>
+                  </div>
+                  
+                  <div className="space-y-3 font-semibold text-xs text-slate-650">
+                    <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                      <span>{lang === 'id' ? 'Kebutuhan Oralit (3 Jam Pertama):' : 'Oralit Fluid Needs (First 3 Hours):'}</span>
+                      <span className="font-display font-black text-emerald-700 text-sm">{oralit.vol} mL</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                      <span>{lang === 'id' ? 'Kebutuhan Sachet (Takaran 200ml):' : 'Oralit Sachets Needed:'}</span>
+                      <span className="font-display font-black text-emerald-700 text-sm">{oralit.sachets} Sachet</span>
+                    </div>
+                    <div className="flex justify-between pb-1">
+                      <span>{lang === 'id' ? 'Air Hangat Matang Pelarut:' : 'Boiled Reconstitution Water:'}</span>
+                      <span className="font-display font-black text-emerald-700 text-sm">{oralit.water} mL</span>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-emerald-50 border border-emerald-100 p-3.5 rounded-2xl space-y-2 mt-3 select-none">
+                    <span className="font-black text-emerald-800 text-[11px] block">💡 {lang === 'id' ? 'PRINSIP REHIDRASI & ZINC' : 'REHYDRATION PRINCIPLES'}</span>
+                    <p className="text-[10px] text-emerald-700 leading-relaxed font-semibold">
+                      {lang === 'id' 
+                        ? '1. Sediakan Oralit di rumah. Larutkan 1 sachet ke dalam 200 ml air masak hangat. \n2. Berikan sendok demi sendok secara perlahan setiap habis BAB cair (berikan 50-100 ml tiap kejadian).'
+                        : '1. Dissolve 1 envelope sachet in exact 200 ml lukewarm boiled water. 2. Feed Oralit teaspoons very slowly after any loose stools.'
+                      }
+                    </p>
                   </div>
                 </div>
 
-                {/* Dropdown sediaan */}
-                <div>
-                  <label htmlFor="sediaan-select" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Sediaan Penurun Demam (Parasetamol)
-                  </label>
-                  <select
-                    id="sediaan-select"
-                    value={selectedSediaan}
-                    onChange={(e) => handleSediaanChange(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-brand-teal rounded-xl py-2.5 px-2.5 text-xs text-slate-700 outline-none transition"
-                  >
-                    {PARASETAMOL_OPTIONS.map((opt) => (
-                      <option key={opt.id} value={opt.id}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* LOCK OVERLAY */}
+                {isMdOrange() && (
+                  <div className="absolute inset-0 bg-white/70 backdrop-blur-[4px] flex flex-col justify-center items-center text-center p-5 z-20" id="muntah-locked-overlay">
+                    <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center text-xl shadow-3xs border border-amber-100 select-none mb-3">
+                      🔒
+                    </div>
+                    <h4 className="font-display font-black text-slate-800 text-xs sm:text-sm uppercase tracking-wider mb-1.5">
+                      {lang === 'id' ? 'Kalkulator Rehidrasi Terkunci' : 'Rehydration Formulas Gated'}
+                    </h4>
+                    <p className="text-amber-850 font-bold text-[11px] sm:text-xs leading-relaxed max-w-xs mb-4">
+                      {lang === 'id' 
+                        ? `Ananda menunjukkan gejala dehidrasi ringan-sedang karena (${(() => {
+                            const p = [];
+                            if (wizardData.mdResponsMinum === 'HAUS') p.push('Sangat Haus');
+                            if (wizardData.mdResponsMinum === 'MALAS_MINUM') p.push('Malas Minum');
+                            if (wizardData.mdKondisiMata === 'CEKUNG') p.push('Mata cekung');
+                            if (wizardData.mdUbunUbun === 'CEKUNG') p.push('Ubun-ubun cekung');
+                            return p.join(' / ');
+                          })()}). Penanganan membutuhkan panduan literatur ketat.`
+                        : `Your child shows moderate dehydration criteria (${(() => {
+                            const p = [];
+                            if (wizardData.mdResponsMinum === 'HAUS') p.push('Eager hunger');
+                            if (wizardData.mdResponsMinum === 'MALAS_MINUM') p.push('Slight apathy');
+                            if (wizardData.mdKondisiMata === 'CEKUNG') p.push('Sunken kelopak');
+                            if (wizardData.mdUbunUbun === 'CEKUNG') p.push('Sunken fontanelle');
+                            return p.join(' / ');
+                          })()}). Calculation tools locked for safety.`
+                      }
+                    </p>
+                    <a 
+                      href="https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Saat_Anak_Sakit_di_Ruma?id=w-TIEQAAQBAJ"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 py-3.5 px-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl text-[11px] sm:text-xs font-black shadow-md cursor-pointer select-none transition animate-pulse"
+                    >
+                      <span>{lang === 'id' ? 'Buka Kalkulator Cairan & Cara Melarutkan Oralit (Rp32.190)' : 'Unlock Fluids Calculator & Guide (Rp32.190)'}</span>
+                      <ExternalLink className="w-4 h-4 shrink-0 text-white" />
+                    </a>
+                  </div>
+                )}
               </div>
 
-              {bbError && (
-                <p className="text-[10px] text-red-600 font-semibold flex items-center gap-1.5">
-                  <AlertOctagon className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                  <span>{bbError}</span>
-                </p>
-              )}
-
-              {/* Outcome result calculation box */}
-              {calculatedDose && !bbError && (
-                <div className="p-5 rounded-2xl bg-brand-cream border border-brand-teal/80 space-y-4 shadow-[0_10px_25px_rgba(95,183,185,0.06)] animate-fade-in" id="paracetamol-result-info">
-                  {selectedSediaan === 'TIDAK_YAKIN' ? (
-                    <div className="text-slate-700 text-[11px] leading-relaxed flex items-start gap-2">
-                      <AlertOctagon className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                      <span><strong>Aplikasi tidak menghitung dosis mL karena konsentrasi obat belum jelas.</strong> Mohon periksa kembali label pada kotak kemasan obat Anda, atau tanyakan langsung apoteker/tenaga kesehatan tentang takarannya.</span>
+              {/* JALUR HIJAU EDUCATION LAYOUT WITH WHITE CRADLE, CHECKMARKS AND SPACE-Y-3 */}
+              {isMdGreen() && (
+                <div className="bg-white border border-slate-150 rounded-3xl p-6 shadow-sm text-left mt-4" id="muntah-green-edukasi">
+                  <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100 mb-4 select-none">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 shrink-0">
+                      <Check className="w-5 h-5 text-emerald-600 stroke-[3px]" />
                     </div>
-                  ) : (
-                    <div className="space-y-1.5 text-left">
-                      <div className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Hasil Estimasi Dosis:</div>
-                      <div className="text-slate-800 font-display text-base font-extrabold flex justify-between">
-                        <span>Dosis:</span>
-                        <span className="text-brand-teal-dark">{calculatedDose.mg} mg per kali minum</span>
-                      </div>
-                      
-                      {calculatedDose.ml !== null && (
-                        <div className="text-slate-800 font-display text-sm font-bold flex justify-between border-t border-brand-teal-light pt-1.5 mt-1">
-                          <span>Setara:</span>
-                          <span className="text-brand-teal-dark">{calculatedDose.ml} mL tiap kali minum</span>
-                        </div>
-                      )}
-                      
-                      <p className="text-[10px] text-slate-500/90 text-right mt-1">
-                        Sediaan obat terpilih: {PARASETAMOL_OPTIONS.find(o => o.id === selectedSediaan)?.label}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Informational warnings */}
-                  <div className="border-t border-brand-teal-light/60 pt-2.5 text-[10px] text-slate-650 space-y-2 font-medium leading-relaxed">
-                    <div className="flex items-start gap-2">
-                      <Check className="w-3 h-3 text-brand-teal shrink-0 mt-0.5" />
-                      <span>Dapat diberikan tiap 4–6 jam bila diperlukan. Maksimal pemberian sebanyak 4 kali dalam kurun waktu 24 jam.</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <Check className="w-3 h-3 text-brand-teal shrink-0 mt-0.5" />
-                      <span>Selalu gunakan spuit (takaran jarum suntik tanpa jarum) atau pipet takar agar takaran obat lebih akurat. Jangan menggunakan sendok makan makan rumah biasa.</span>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <Check className="w-3 h-3 text-brand-teal shrink-0 mt-0.5" />
-                      <span>Jangan digabung atau dicampur dengan obat resep dokter lain yang juga mengandung zat aktif parasetamol guna menghindari dosis ganda.</span>
-                    </div>
-                    {risk === 'ORANYE' && (
-                      <div className="flex items-start gap-2.5 text-amber-900 bg-amber-50/80 p-2.5 border border-amber-100 rounded-xl mt-1.5 text-[9.5px]">
-                        <AlertOctagon className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5 animate-pulse" />
-                        <span><strong>Peringatan Penting</strong>: Jangan menunda pemeriksaan dokter hari ini hanya karena suhu tubuh ananda sempat turun setelah meminum obat penurun demam ini.</span>
-                      </div>
-                    )}
+                    <span className="font-display font-black text-slate-800 uppercase tracking-wider text-xs sm:text-sm">
+                      {lang === 'id' ? 'Panduan Perawatan Diare Mandiri' : 'Home Care Rehydration Guidelines'}
+                    </span>
                   </div>
+                  
+                  <ul className="space-y-3">
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Beri minum air mineral matang, air rebusan beras (tajin), sup hangat, atau air kelapa muda sesering mungkin.' : 'Provide clean mineral water, thin rice porridge brew, vegetable soups, or young coconut water regularly.'}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Lanjutkan pemberian ASI atau Susu Formula sebanyak biasanya. Jangan kurangi atau batasi frekuensi minum dot.' : 'Maintain standard breastfeeding rate or formula dilution values. Do not lessen fluid volumes.'}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Sajikan porsi makan yang lebih sedikit namun berulang kali (sup bubur halus saring, pisang atau apel kukus).' : 'Feed smaller but highly repetitive solid portions (filtered porridges, steamed banana grids, or mashed apple).'}
+                      </span>
+                    </li>
+                  </ul>
                 </div>
               )}
             </div>
           )}
+
+          {/* TRACK 2: ANAK BATUK / SESAK */}
+          {selectedModule === 'BATUK_SESAK' && (
+            <div className="space-y-5">
+              
+              <div className="relative bg-white border border-slate-150 rounded-3xl p-5 shadow-3xs overflow-hidden text-left" id="batuk-calc-box">
+                {/* BLUR PORTAL ONLY IF ORANGE PATH */}
+                <div className={`space-y-4 ${isBsOrange() ? 'blur-[5px] select-none pointer-events-none opacity-40' : ''}`}>
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-2 select-none">
+                    <Activity className="w-4.5 h-4.5 text-[#5FB7B9] shrink-0" />
+                    <span className="font-display font-black text-xs text-slate-800 uppercase tracking-widest">{lang === 'id' ? 'Analisis Laju Napas & Diagnosis' : 'Breathing Analysis & Advice'}</span>
+                  </div>
+                  
+                  <div className="space-y-2.5 text-xs font-semibold text-slate-650">
+                    <div className="flex justify-between border-b border-slate-105 pb-2 leading-tight">
+                      <span>{lang === 'id' ? 'Frekuensi Bernapas Terhitung:' : 'Observed Breathing Rate:'}</span>
+                      <span className="font-mono font-extrabold text-blue-750 text-sm">{wizardData.bsLajuNapas} x/menit</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-105 pb-2">
+                      <span>{lang === 'id' ? 'Klasifikasi Kecepatan Napas:' : 'Respiration Category:'}</span>
+                      <span className="font-black text-emerald-600 text-xs uppercase">{lang === 'id' ? 'NORMAL (Tidak Cepat)' : 'NORMAL'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>{lang === 'id' ? 'Terdengar Suara Mengi:' : 'Audible Wheezing:'}</span>
+                      <span className="font-black text-slate-700 text-xs uppercase">{lang === 'id' ? 'TIDAK TERDENGAR' : 'NONE'}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-50 border border-emerald-110 p-3.5 rounded-2xl mt-2 select-none">
+                    <span className="font-black text-emerald-800 text-[11px] block">💡 {lang === 'id' ? 'CUCI HIDUNG & THERAPY MANDIRI' : 'NASAL RINSINGS & COMFORT'}</span>
+                    <p className="text-[10.5px] text-emerald-700 leading-normal font-semibold">
+                      {lang === 'id'
+                        ? '1. Bilas hidung tersumbat secara berkala memakai larutan garam/cucian steril NaCl 0.9% hangat. \n2. Hidupan pelembab uap dingin (Humidifier) dalam kamar tidur kembang.'
+                        : '1. Flush mucus blockages using lukewarm sterile saline saline (NaCl 0.9%). 2. Switch on humidifiers to keep mucosa hydrated.'
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                {/* LOCK OVERLAY IF ORANGE */}
+                {isBsOrange() && (
+                  <div className="absolute inset-0 bg-white/70 backdrop-blur-[4px] flex flex-col justify-center items-center text-center p-5 z-20" id="batuk-locked-overlay">
+                    <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center text-xl shadow-3xs border border-amber-100 select-none mb-3">
+                      🔒
+                    </div>
+                    <h4 className="font-display font-black text-slate-800 text-xs sm:text-sm uppercase tracking-wider mb-1.5">
+                      {lang === 'id' ? 'Klasifikasi Pernapasan Terkunci' : 'Respiratory Advisories Gated'}
+                    </h4>
+                    <p className="text-amber-850 font-bold text-[11px] sm:text-xs leading-relaxed max-w-xs mb-4">
+                      {lang === 'id' 
+                        ? `Kondisi ananda memerlukan observasi ketat karena (${(() => {
+                            const p = [];
+                            if (getIsBsTachypnea()) p.push('Laju Napas Cepat (Takipnea)');
+                            if (wizardData.bsSuaraMengi === 'YA') p.push('Ada suara Mengi');
+                            if (wizardData.bsDurasi === 'LEBIH_14_HARI') p.push('Sakit ≥14 Hari (Kronis)');
+                            return p.join(' / ');
+                          })()}). Penanganan uap membutuhkan literatur medis ketat.`
+                        : `Your child triggers respiratory caution protocols (${(() => {
+                            const p = [];
+                            if (getIsBsTachypnea()) p.push('Tachypnea / Fast breath rate');
+                            if (wizardData.bsSuaraMengi === 'YA') p.push('Wheezing noise');
+                            if (wizardData.bsDurasi === 'LEBIH_14_HARI') p.push('Chronic scale ≥14 days');
+                            return p.join(' / ');
+                          })()}). Calculation dashboards locked.`
+                      }
+                    </p>
+                    <a 
+                      href="https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Batuk_Pilek_atau_Sesak?id=29rJEQAAQBAJ"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 py-3.5 px-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl text-[11px] sm:text-xs font-black shadow-md cursor-pointer select-none transition animate-pulse"
+                    >
+                      <span>{lang === 'id' ? 'Napas Cepat! Buka Panduan Lengkap & Tata Laksana Uap (Rp31.080)' : 'Unlock Nebulizer & Breath Guides (Rp31.080)'}</span>
+                      <ExternalLink className="w-4 h-4 shrink-0 text-white" />
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* JALUR HIJAU EDUCATION WITH WHITE CRADLE, CHECKMARKS AND SPACE-Y-3 */}
+              {isBsGreen() && (
+                <div className="bg-white border border-slate-150 rounded-3xl p-6 shadow-sm text-left mt-4" id="batuk-green-edukasi">
+                  <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100 mb-4 select-none">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 shrink-0">
+                      <Check className="w-5 h-5 text-emerald-600 stroke-[3px]" />
+                    </div>
+                    <span className="font-display font-black text-slate-800 uppercase tracking-wider text-xs sm:text-sm">
+                      {lang === 'id' ? 'Cara Cuci Hidung Anak Secara Aman' : 'Nasal Flush Safe Implementation'}
+                    </span>
+                  </div>
+
+                  <ul className="space-y-3">
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Miringkan kepala anak sedikit ke samping kanan atau kiri tergantung lubang hidung yang dicuci di wastafel.' : 'Tilt the child\'s head slowly to the opposite shoulder side depending on the nostril being flushed.'}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Semprotkan 1-2 ml cairan steril NaCl 0.9% hangat menggunakan spet tumpul tanpa kateter secara perlahan.' : 'Gently inject 1-2 mL of lukewarm sterilized NaCl 0.9% (saline) solution inside using a needleless syringe.'}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Biarkan sisa air infus keluar secara alami membawa sumbatan lendir hidung, usap halus dengan tisu kering.' : 'Allow excess mucus or discharge to flow out naturally from the opposite nasal opening, then wipe with dry tissue.'}
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TRACK 3: ANAK DEMAM */}
+          {selectedModule === 'DEMAM' && (
+            <div className="space-y-5">
+              
+              <div className="relative bg-white border border-slate-150 rounded-3xl p-5 shadow-3xs overflow-hidden text-left" id="demam-calc-box">
+                {/* BLUR ONLY IF ORANGE */}
+                <div className={`space-y-4 ${isDemamOrange() ? 'blur-[5px] select-none pointer-events-none opacity-40' : ''}`}>
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-2 select-none">
+                    <Calculator className="w-4.5 h-4.5 text-[#5FB7B9] shrink-0" />
+                    <span className="font-display font-black text-xs text-slate-800 uppercase tracking-widest">{lang === 'id' ? 'Kalkulator Dosis Parasetamol Presisi' : 'Precision Paracetamol Dose Calculator'}</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="flex justify-between text-xs font-semibold text-slate-500">
+                      <span>{lang === 'id' ? 'Berat Badan Acuan:' : 'Current Weight Basis:'}</span>
+                      <span className="font-bold text-slate-800">{wizardData.demamBeratBadan || '10'} kg</span>
+                    </div>
+
+                    <div className="flex justify-between border-b border-slate-150 pb-2 text-xs font-semibold text-slate-650">
+                      <span>{lang === 'id' ? 'Rekomendasi Dosis (miligram):' : 'Target Dosage (mg):'}</span>
+                      <span className="font-extrabold text-emerald-700 text-[13px]">{para.mgMin} – {para.mgMax} mg</span>
+                    </div>
+
+                    <div className="space-y-1.5 select-none text-left">
+                      <label htmlFor="hasil-sediaan-select" className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">{lang === 'id' ? 'Pilih Sediaan Obat yang Tersedia di Rumah:' : 'Select Home Available Medication Syrup:'}</label>
+                      <select
+                        id="hasil-sediaan-select"
+                        value={selectedSediaan}
+                        onChange={(e) => setSelectedSediaan(e.target.value as any)}
+                        className="w-full h-11 bg-slate-50 border border-slate-150 rounded-xl px-3 text-xs outline-none focus:border-[#5FB7B9] font-bold text-slate-700 cursor-pointer"
+                      >
+                        {PARASETAMOL_OPTIONS.map(opt => (
+                          <option key={opt.id} value={opt.id}>
+                            {lang === 'id' ? opt.label : opt.labelEn || opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {para.mlMin !== null && para.mlMax !== null && (
+                      <div className="flex justify-between bg-emerald-50 border border-emerald-100 p-3.5 rounded-2xl text-xs font-semibold text-emerald-800 items-center">
+                        <span>{lang === 'id' ? 'Takaran Takaran Sekali Minum:' : 'Dosage Volume per Intake:'}</span>
+                        <span className="font-display font-black text-sm italic">{para.mlMin} – {para.mlMax} mL</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* LOCK OVERLAY IF ORANGE PATH */}
+                {isDemamOrange() && (
+                  <div className="absolute inset-0 bg-white/70 backdrop-blur-[4px] flex flex-col justify-center items-center text-center p-5 z-20" id="demam-locked-overlay">
+                    <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center text-xl shadow-3xs border border-amber-100 select-none mb-3">
+                      🔒
+                    </div>
+                    <h4 className="font-display font-black text-slate-800 text-xs sm:text-sm uppercase tracking-wider mb-1.5">
+                      {lang === 'id' ? 'Kalkulator Dosis Terkunci' : 'Dosage Calculator Locked'}
+                    </h4>
+                    <p className="text-amber-850 font-bold text-[11px] sm:text-xs leading-relaxed max-w-xs mb-4">
+                      {lang === 'id' 
+                        ? `Kondisi ananda butuh observasi medis khusus karena (${(() => {
+                            const p = [];
+                            if (parseFloat(wizardData.demamSuhu) >= 39.0) p.push('Suhu tinggi ≥39°C');
+                            if (wizardData.demamLama === '3_HARI_LEBIH') p.push('Demam lama ≥3 hari');
+                            if (wizardData.demamRiwayatKejang === 'PERNAH') p.push('Ada Riwayat Kejang');
+                            if (wizardData.demamUsiaGroup === 'KURANG_3_BULAN') p.push('Bayi <3 bulan');
+                            return p.join(' / ');
+                          })()}). Pemberian obat beresiko tinggi jika tanpa panduan ketat.`
+                        : `Your child requires careful checks since (${(() => {
+                            const p = [];
+                            if (parseFloat(wizardData.demamSuhu) >= 39.0) p.push('High Temp ≥39°C');
+                            if (wizardData.demamLama === '3_HARI_LEBIH') p.push('Fever ≥3 days');
+                            if (wizardData.demamRiwayatKejang === 'PERNAH') p.push('History of Seizure');
+                            if (wizardData.demamUsiaGroup === 'KURANG_3_BULAN') p.push('Infant <3 months');
+                            return p.join(' / ');
+                          })()}). Dosing is guarded.`
+                      }
+                    </p>
+                    <a 
+                      href="https://play.google.com/store/books/details/dr_Zulia_Ahmad_Burhani_SpA_Saat_Anak_Sakit_di_Ruma?id=w-TIEQAAQBAJ"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 py-3.5 px-5 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl text-[11px] sm:text-xs font-black shadow-md cursor-pointer select-none transition animate-pulse"
+                    >
+                      <span>{lang === 'id' ? 'Waspada Komplikasi! Buka Kalkulator Dosis Obat & Panduan Demam (Rp32.190)' : 'Unlock Fever Compendium & Dosages (Rp32.190)'}</span>
+                      <ExternalLink className="w-4 h-4 shrink-0 text-white" />
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* JALUR HIJAU COMPRESS RULES WITH WHITE CARD CRADLE, CHECKMARKS AND SPACE-Y-3 */}
+              {isDemamGreen() && (
+                <div className="bg-white border border-slate-150 rounded-3xl p-6 shadow-sm text-left mt-4" id="demam-green-edukasi">
+                  <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100 mb-4 select-none">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 shrink-0">
+                      <Check className="w-5 h-5 text-emerald-600 stroke-[3px]" />
+                    </div>
+                    <span className="font-display font-black text-slate-800 uppercase tracking-wider text-xs sm:text-sm">
+                      {lang === 'id' ? 'Tips Mengompres Anak yang Benar' : 'Proper Compress Methodology'}
+                    </span>
+                  </div>
+
+                  <ul className="space-y-3">
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Gunakan air hangat suam kuku biasa (jangan pakai air seduhan es atau alkohol) untuk meredam suhu.' : 'Use lukewarm tap water (never chilled ice water or alcohol rubs) to wipe.'}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Seka lipatan-lipatan tubuh bayi (terutama sela-sela ketiak ataupun lekuk paha panggul) sebagai area pembuangan panas utama.' : 'Compress around rich arterial folds like armpits and groin joints, not just the forehead.'}
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-3">
+                      <Check className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-slate-600 text-xs sm:text-sm leading-relaxed font-semibold">
+                        {lang === 'id' ? 'Basahi kembali kompresan seka hangat bila sudah mulai mendingin agar pori-pori kulit anak tetap lebar melepas suhu.' : 'Replenish and re-moisten wraps as soon as they cool down to keep vessels dilated.'}
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
-      )}
-
-      {/* 5. DR. ZULIA'S RECOMMENDED E-BOOK CARDS (SHOWN IN THE NORMAL ORDER FOR GREEN/YELLOW/ORANGE) */}
-      {risk !== 'MERAH' && renderEBooks(false)}
-
-      {/* 6. WHATSAPP AUTOMATED SHARER BUTTON */}
-      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 shadow-sm space-y-2.5" id="whatsapp-share-block">
-        <div className="flex items-start gap-3">
-          <Share2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.75" />
-          <div className="space-y-0.5 text-left">
-            <h4 className="font-display font-bold text-[11px] text-slate-800">Simpan Ringkasan Hasil</h4>
-            <p className="text-slate-500 text-[9.5px] leading-relaxed">
-              Bunda bisa menyimpan ringkasan hasil ini ke WhatsApp agar mudah dibaca ulang atau dibagikan ke keluarga.
-            </p>
-          </div>
-        </div>
-
-        <a
-          href={generateWhatsAppShare()}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-display font-semibold rounded-lg text-xs transition duration-200 flex items-center justify-center gap-1.5 shadow-sm text-center font-bold"
-          id="send-to-whatsapp-btn"
-        >
-          <span>Kirim ke WhatsApp</span>
-        </a>
-
-        <p className="text-center text-[8.5px] text-slate-400">
-          🔒 Aplikasi ini tidak memerlukan, menyimpan, atau membagikan nomor WhatsApp Bunda.
-        </p>
       </div>
 
-      {/* 7. RED RISK: EMBEDDED RECOMMENDED E-BOOKS AT THE VERY BOTTOM OF THE RESULTS PAGE (LESS DOMINANT) */}
-      {risk === 'MERAH' && renderEBooks(true)}
-
-      {/* Bottom Repeat Reset Option */}
-      <div className="pt-6 pb-2 text-center">
-        <button
+      {/* FOOTER ACTIONS AND REBOOT */}
+      <div className="p-5 bg-slate-50 rounded-3xl border border-slate-200/50 flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 select-none" id="hasil-footer-reset-bar">
+        <div className="text-center sm:text-left">
+          <h4 className="font-display font-black text-slate-800 text-xs sm:text-sm uppercase tracking-wide">
+            {lang === 'id' ? 'Ingin mengulangi pemeriksaan?' : 'Evaluate another child?'}
+          </h4>
+          <p className="text-[10px] sm:text-xs text-slate-450 font-semibold leading-relaxed mt-1">
+            {lang === 'id' ? 'Anda dapat kembali ke halaman muka untuk menyaring gejala sakit anak yang lain.' : 'You can reset answers and return to the main dashboard.'}
+          </p>
+        </div>
+        
+        <button 
+          type="button"
           onClick={onReset}
-          className="inline-flex items-center gap-1.5 py-2.5 px-6 border border-slate-200 hover:border-slate-300 rounded-2xl bg-white text-slate-600 text-xs font-semibold hover:text-slate-800 transition shadow-[0_2px_8px_rgba(0,0,0,0.01)]"
-          id="repeat-guidance-btn"
+          className="w-full sm:w-auto py-3.5 px-6 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white font-display font-black text-xs sm:text-sm transition flex items-center justify-center gap-1.5 shadow-sm hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Ulangi Penilaian Mandiri</span>
+          <RotateCcw className="w-4 h-4 text-white" />
+          <span>{lang === 'id' ? 'Ulangi & Reset Pemeriksaan' : 'Reset & Start Over'}</span>
         </button>
       </div>
+
     </div>
   );
 }
